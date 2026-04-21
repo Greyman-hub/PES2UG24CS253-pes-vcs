@@ -221,8 +221,13 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     size_t data_len;
     if (commit_serialize(&commit, &data, &data_len) != 0) return -1;
 
-    // Steps 7-8: TODO in next commits
+    // Step 7: Write commit object to the object store
+    if (object_write(OBJ_COMMIT, data, data_len, commit_id_out) != 0) {
+        free(data);
+        return -1;
+    }
     free(data);
-    (void)commit_id_out;
+
+    // Step 8: TODO in next commit
     return -1;
 }
