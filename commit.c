@@ -164,18 +164,18 @@ int head_update(const ObjectID *new_commit) {
 
     char tmp_path[528];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", target_path);
-
+    
     f = fopen(tmp_path, "w");
     if (!f) return -1;
-
+    
     char hex[HASH_HEX_SIZE + 1];
     hash_to_hex(new_commit, hex);
     fprintf(f, "%s\n", hex);
-
+    
     fflush(f);
     fsync(fileno(f));
     fclose(f);
-
+    
     return rename(tmp_path, target_path);
 }
 
@@ -194,42 +194,30 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement commit creation
-    // (See Lab Appendix for logical steps)
+    if (!message || !commit_id_out) return -1;
+    if (message[0] == '\0') return -1;
 
-    // Step 1: Build tree from current index
-    ObjectID tree_id;
-    if (tree_from_index(&tree_id) != 0) return -1;
+    Commit c;
+    memset(&c, 0, sizeof(c));
 
-    // Step 2: Fill in the Commit struct
-    Commit commit;
-    memset(&commit, 0, sizeof(commit));
-    commit.tree = tree_id;
+    if (tree_from_index(&c.tree) != 0) return -1;
 
-    // Step 3: Read parent commit if one exists
-    commit.has_parent = (head_read(&commit.parent) == 0);
+    c.has_parent = (head_read(&c.parent) == 0) ? 1 : 0;
 
-    // Step 4: Set author and timestamp
-    snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
-    commit.timestamp = (uint64_t)time(NULL);
+    snprintf(c.author, sizeof(c.author), "%s", pes_author());
+    c.timestamp = (uint64_t)time(NULL);
+    snprintf(c.message, sizeof(c.message), "%s", message);
 
-    // Step 5: Set commit message
-    snprintf(commit.message, sizeof(commit.message), "%s", message);
+    void *raw = NULL;
+    size_t raw_len = 0;
+    if (commit_serialize(&c, &raw, &raw_len) != 0) return -1;
 
-    // Step 6: Serialize commit struct to text buffer
-    void *data;
-    size_t data_len;
-    if (commit_serialize(&commit, &data, &data_len) != 0) return -1;
+    ObjectID commit_id;
+    int rc = object_write(OBJ_COMMIT, raw, raw_len, &commit_id);
+    free(raw);
+    if (rc != 0) return -1;
 
-    // Step 7: Write commit object to the object store
-    if (object_write(OBJ_COMMIT, data, data_len, commit_id_out) != 0) {
-        free(data);
-        return -1;
-    }
-    free(data);
-
-    // Step 8: Update HEAD to point to the new commit
-    if (head_update(commit_id_out) != 0) return -1;
-
+    if (head_update(&commit_id) != 0) return -1;
+    *commit_id_out = commit_id;
     return 0;
 }

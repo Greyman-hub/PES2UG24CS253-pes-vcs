@@ -24,6 +24,15 @@
 #include <unistd.h>
 #include <dirent.h>
 
+// Forward declaration (implemented in object.c)
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+
+static int compare_index_entries(const void *a, const void *b) {
+    const IndexEntry *ea = (const IndexEntry *)a;
+    const IndexEntry *eb = (const IndexEntry *)b;
+    return strcmp(ea->path, eb->path);
+}
+
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
 // Find an index entry by path (linear scan).
@@ -135,33 +144,40 @@ int index_status(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_load(Index *index) {
-    // TODO: Implement index loading
-    // (See Lab Appendix for logical steps)
+    if (!index) return -1;
     index->count = 0;
 
-    // If index file doesn't exist yet, that's fine — empty index
-    FILE *f = fopen(INDEX_PATH, "r");
-    if (!f) return 0;
+    FILE *f = fopen(INDEX_FILE, "r");
+    if (!f) return 0; // No index yet is valid.
 
-    char hex[HASH_HEX_SIZE + 1];
-    char path[MAX_PATH_LEN];
-    uint32_t mode;
-    uint64_t mtime_sec;
-    uint64_t size;
-
-    while (fscanf(f, "%o %64s %lu %lu %s",
-                  &mode, hex, &mtime_sec, &size, path) == 5
-           && index->count < MAX_INDEX_ENTRIES) {
-        IndexEntry *e = &index->entries[index->count];
-        e->mode      = mode;
-        e->mtime_sec = mtime_sec;
-        e->size      = size;
-        strncpy(e->path, path, MAX_PATH_LEN - 1);
-        e->path[MAX_PATH_LEN - 1] = '\0';
-        if (hex_to_hash(hex, &e->id) != 0) {
-            fprintf(stderr, "warning: skipping malformed index entry\n");
-            continue;
+    char line[2048];
+    while (fgets(line, sizeof(line), f)) {
+        if (index->count >= MAX_INDEX_ENTRIES) {
+            fclose(f);
+            return -1;
         }
+
+        char mode_str[16];
+        char hex[HASH_HEX_SIZE + 1];
+        unsigned long long mtime = 0;
+        unsigned int size = 0;
+        char path[512];
+
+        if (sscanf(line, "%15s %64s %llu %u %511[^\n]",
+                   mode_str, hex, &mtime, &size, path) != 5) {
+            fclose(f);
+            return -1;
+        }
+
+        IndexEntry *e = &index->entries[index->count];
+        e->mode = (uint32_t)strtoul(mode_str, NULL, 8);
+        if (hex_to_hash(hex, &e->hash) != 0) {
+            fclose(f);
+            return -1;
+        }
+        e->mtime_sec = (uint64_t)mtime;
+        e->size = size;
+        snprintf(e->path, sizeof(e->path), "%s", path);
         index->count++;
     }
 
@@ -179,51 +195,56 @@ int index_load(Index *index) {
 //   - rename                           : atomically moving the temp file over the old index
 //
 // Returns 0 on success, -1 on error.
-
-// Sort helper for index entries by path
-static int cmp_index_path(const void *a, const void *b) {
-    return strcmp(((const IndexEntry *)a)->path,
-                  ((const IndexEntry *)b)->path);
-}
-
 int index_save(const Index *index) {
-    // TODO: Implement atomic index saving
-    // (See Lab Appendix for logical steps)
+    if (!index) return -1;
 
-    // Step 1: Make a mutable copy so we can sort it
-    Index sorted = *index;
-    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), cmp_index_path);
+    Index *sorted = malloc(sizeof(Index));
+    if (!sorted) return -1;
+    *sorted = *index;
+    qsort(sorted->entries, sorted->count, sizeof(IndexEntry), compare_index_entries);
 
-    // Step 2: Write to a temp file first
-    char tmp_path[256];
-    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_PATH);
-
+    const char *tmp_path = ".pes/index.tmp";
     FILE *f = fopen(tmp_path, "w");
     if (!f) {
-        fprintf(stderr, "error: cannot write index to '%s'\n", tmp_path);  // <-- ADDED
+        free(sorted);
         return -1;
     }
 
-    // Step 3: Write each entry in text format
-    for (int i = 0; i < sorted.count; i++) {
-        const IndexEntry *e = &sorted.entries[i];
+    for (int i = 0; i < sorted->count; i++) {
         char hex[HASH_HEX_SIZE + 1];
-        hash_to_hex(&e->id, hex);
-        fprintf(f, "%o %s %lu %lu %s\n",
-                e->mode, hex,
-                (unsigned long)e->mtime_sec,
-                (unsigned long)e->size,
-                e->path);
+        hash_to_hex(&sorted->entries[i].hash, hex);
+        if (fprintf(f, "%o %s %llu %u %s\n",
+                    sorted->entries[i].mode,
+                    hex,
+                    (unsigned long long)sorted->entries[i].mtime_sec,
+                    sorted->entries[i].size,
+                    sorted->entries[i].path) < 0) {
+            fclose(f);
+            free(sorted);
+            return -1;
+        }
     }
 
-    // Step 4: Flush userspace buffer, sync to disk, close
-    fflush(f);
-    fsync(fileno(f));
-    fclose(f);
+    if (fflush(f) != 0) {
+        fclose(f);
+        free(sorted);
+        return -1;
+    }
+    if (fsync(fileno(f)) != 0) {
+        fclose(f);
+        free(sorted);
+        return -1;
+    }
+    if (fclose(f) != 0) {
+        free(sorted);
+        return -1;
+    }
 
-    // Step 5: Atomically replace old index with new one
-    if (rename(tmp_path, INDEX_PATH) != 0) return -1;
-
+    if (rename(tmp_path, INDEX_FILE) != 0) {
+        free(sorted);
+        return -1;
+    }
+    free(sorted);
     return 0;
 }
 
@@ -237,51 +258,46 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-    // TODO: Implement file staging
-    // (See Lab Appendix for logical steps)
+    if (!index || !path) return -1;
 
-    // Step 1: Open and read the file contents
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return -1;
+
     FILE *f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "error: cannot open '%s'\n", path);
-        return -1;
-    }
-    fseek(f, 0, SEEK_END);
-    size_t sz = ftell(f);
-    rewind(f);
+    if (!f) return -1;
 
-    void *data = malloc(sz);
-    if (!data) { fclose(f); return -1; }
-    (void)fread(data, 1, sz, f);
+    size_t len = (size_t)st.st_size;
+    void *buf = NULL;
+    if (len > 0) {
+        buf = malloc(len);
+        if (!buf) {
+            fclose(f);
+            return -1;
+        }
+        if (fread(buf, 1, len, f) != len) {
+            free(buf);
+            fclose(f);
+            return -1;
+        }
+    }
     fclose(f);
 
-    // Step 2: Write file contents as a blob object
-    ObjectID id;
-    if (object_write(OBJ_BLOB, data, sz, &id) != 0) {
-        free(data);
-        return -1;
-    }
-    free(data);
+    ObjectID blob_id;
+    int rc = object_write(OBJ_BLOB, buf, len, &blob_id);
+    free(buf);
+    if (rc != 0) return -1;
 
-    // Step 3: Get file metadata (mode, mtime, size)
-    struct stat st;
-    if (lstat(path, &st) != 0) return -1;
-    uint32_t mode = (st.st_mode & S_IXUSR) ? 0100755 : 0100644;
-
-    // Step 4: Update or add the index entry
-    IndexEntry *e = index_find(index, path);
-    if (!e) {
-        // New entry — append to index
+    IndexEntry *entry = index_find(index, path);
+    if (!entry) {
         if (index->count >= MAX_INDEX_ENTRIES) return -1;
-        e = &index->entries[index->count++];
+        entry = &index->entries[index->count++];
     }
-    e->mode      = mode;
-    e->mtime_sec = (uint64_t)st.st_mtime;
-    e->size      = (uint64_t)st.st_size;
-    e->id        = id;
-    strncpy(e->path, path, MAX_PATH_LEN - 1);
-    e->path[MAX_PATH_LEN - 1] = '\0';
 
-    // Step 5: Save updated index to disk
+    entry->mode = (st.st_mode & S_IXUSR) ? 0100755 : 0100644;
+    entry->hash = blob_id;
+    entry->mtime_sec = (uint64_t)st.st_mtime;
+    entry->size = (uint32_t)st.st_size;
+    snprintf(entry->path, sizeof(entry->path), "%s", path);
+
     return index_save(index);
 }
