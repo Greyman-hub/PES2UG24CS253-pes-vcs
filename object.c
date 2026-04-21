@@ -120,7 +120,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 
     int fd = open(tmp_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) { free(full); return -1; }
-    write(fd, full, total);
+    (void)write(fd, full, total);
     fsync(fd);
     close(fd);
     free(full);
