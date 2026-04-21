@@ -169,8 +169,10 @@ static int write_tree_level(IndexEntry *entries, int count, int prefix_depth, Ob
 }
 
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+    // Load the index to get all staged files
+    Index idx;
+    if (index_load(&idx) != 0) return -1;
+
+    // Build tree recursively starting at depth 0 (root)
+    return write_tree_level(idx.entries, idx.count, 0, id_out);
 }
