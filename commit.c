@@ -201,7 +201,19 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     ObjectID tree_id;
     if (tree_from_index(&tree_id) != 0) return -1;
 
-    // Steps 2-8: TODO in next commits
+    // Step 2: Fill in the Commit struct
+    Commit commit;
+    memset(&commit, 0, sizeof(commit));
+    commit.tree = tree_id;
+
+    // Step 3: Read parent commit if one exists
+    commit.has_parent = (head_read(&commit.parent) == 0);
+
+    // Step 4: Set author and timestamp
+    snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
+    commit.timestamp = (uint64_t)time(NULL);
+
+    // Steps 5-8: TODO in next commits
     (void)message; (void)commit_id_out;
     return -1;
 }
