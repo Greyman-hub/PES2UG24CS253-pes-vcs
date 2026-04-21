@@ -158,7 +158,7 @@ int index_load(Index *index) {
         e->size      = size;
         strncpy(e->path, path, MAX_PATH_LEN - 1);
         e->path[MAX_PATH_LEN - 1] = '\0';
-        if (hex_to_hash(hex, &e->id) != 0) {   // <-- ADDED
+        if (hex_to_hash(hex, &e->id) != 0) {
             fprintf(stderr, "warning: skipping malformed index entry\n");
             continue;
         }
@@ -199,7 +199,10 @@ int index_save(const Index *index) {
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_PATH);
 
     FILE *f = fopen(tmp_path, "w");
-    if (!f) return -1;
+    if (!f) {
+        fprintf(stderr, "error: cannot write index to '%s'\n", tmp_path);  // <-- ADDED
+        return -1;
+    }
 
     // Step 3: Write each entry in text format
     for (int i = 0; i < sorted.count; i++) {
