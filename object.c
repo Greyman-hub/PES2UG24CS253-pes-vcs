@@ -114,7 +114,7 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
     mkdir(shard_dir, 0755);
 
-    char final_path[512], tmp_path[512];
+    char final_path[512], tmp_path[520];
     object_path(id_out, final_path, sizeof(final_path));
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", final_path);
 
