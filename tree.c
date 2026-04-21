@@ -110,9 +110,62 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 // Recursive helper: builds a tree from a subset of index entries
 // prefix_depth = how many path components deep we are
 static int write_tree_level(IndexEntry *entries, int count, int prefix_depth, ObjectID *id_out) {
-    // TODO: will be implemented in next commit
-    (void)entries; (void)count; (void)prefix_depth; (void)id_out;
-    return -1;
+    Tree tree;
+    tree.count = 0;
+
+    char seen_dirs[MAX_INDEX_ENTRIES][MAX_PATH_LEN];
+    int seen_count = 0;
+
+    for (int i = 0; i < count; i++) {
+        // Get the path component at this depth
+        const char *p = entries[i].path;
+        // Skip prefix_depth components
+        for (int d = 0; d < prefix_depth; d++) {
+            p = strchr(p, '/');
+            if (!p) return -1;
+            p++; // skip the '/'
+        }
+
+        char *slash = strchr(p, '/');
+        if (!slash) {
+            // Root-level file at this depth — add as blob entry
+            TreeEntry *e = &tree.entries[tree.count++];
+            e->mode = entries[i].mode;
+            strncpy(e->name, p, sizeof(e->name) - 1);
+            e->name[sizeof(e->name) - 1] = '\0';
+            e->hash = entries[i].id;
+        } else {
+            // Subdirectory — extract dir name
+            char dir[MAX_PATH_LEN];
+            size_t dlen = slash - p;
+            strncpy(dir, p, dlen);
+            dir[dlen] = '\0';
+
+            // Skip if already processed this dir
+            int already = 0;
+            for (int j = 0; j < seen_count; j++)
+                if (strcmp(seen_dirs[j], dir) == 0) { already = 1; break; }
+            if (already) continue;
+            strncpy(seen_dirs[seen_count++], dir, MAX_PATH_LEN - 1);
+
+            // Recursively build subtree
+            ObjectID sub_id;
+            write_tree_level(entries, count, prefix_depth + 1, &sub_id);
+
+            TreeEntry *e = &tree.entries[tree.count++];
+            e->mode = MODE_DIR;
+            strncpy(e->name, dir, sizeof(e->name) - 1);
+            e->name[sizeof(e->name) - 1] = '\0';
+            e->hash = sub_id;
+        }
+    }
+
+    // Serialize and write tree object
+    void *raw; size_t raw_len;
+    if (tree_serialize(&tree, &raw, &raw_len) != 0) return -1;
+    int ret = object_write(OBJ_TREE, raw, raw_len, id_out);
+    free(raw);
+    return ret;
 }
 
 int tree_from_index(ObjectID *id_out) {
