@@ -158,7 +158,10 @@ int index_load(Index *index) {
         e->size      = size;
         strncpy(e->path, path, MAX_PATH_LEN - 1);
         e->path[MAX_PATH_LEN - 1] = '\0';
-        hex_to_hash(hex, &e->id);
+        if (hex_to_hash(hex, &e->id) != 0) {   // <-- ADDED
+            fprintf(stderr, "warning: skipping malformed index entry\n");
+            continue;
+        }
         index->count++;
     }
 
