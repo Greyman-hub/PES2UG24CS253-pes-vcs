@@ -233,6 +233,49 @@ int index_save(const Index *index) {
 int index_add(Index *index, const char *path) {
     // TODO: Implement file staging
     // (See Lab Appendix for logical steps)
-    (void)index; (void)path;
-    return -1;
+
+    // Step 1: Open and read the file contents
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "error: cannot open '%s'\n", path);
+        return -1;
+    }
+    fseek(f, 0, SEEK_END);
+    size_t sz = ftell(f);
+    rewind(f);
+
+    void *data = malloc(sz);
+    if (!data) { fclose(f); return -1; }
+    (void)fread(data, 1, sz, f);
+    fclose(f);
+
+    // Step 2: Write file contents as a blob object
+    ObjectID id;
+    if (object_write(OBJ_BLOB, data, sz, &id) != 0) {
+        free(data);
+        return -1;
+    }
+    free(data);
+
+    // Step 3: Get file metadata (mode, mtime, size)
+    struct stat st;
+    if (lstat(path, &st) != 0) return -1;
+    uint32_t mode = (st.st_mode & S_IXUSR) ? 0100755 : 0100644;
+
+    // Step 4: Update or add the index entry
+    IndexEntry *e = index_find(index, path);
+    if (!e) {
+        // New entry — append to index
+        if (index->count >= MAX_INDEX_ENTRIES) return -1;
+        e = &index->entries[index->count++];
+    }
+    e->mode      = mode;
+    e->mtime_sec = (uint64_t)st.st_mtime;
+    e->size      = (uint64_t)st.st_size;
+    e->id        = id;
+    strncpy(e->path, path, MAX_PATH_LEN - 1);
+    e->path[MAX_PATH_LEN - 1] = '\0';
+
+    // Step 5: Save updated index to disk
+    return index_save(index);
 }
