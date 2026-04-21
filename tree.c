@@ -174,6 +174,16 @@ int tree_from_index(ObjectID *id_out) {
     Index idx;
     if (index_load(&idx) != 0) return -1;
 
+    // Guard: nothing staged is not an error, write empty tree
+    if (idx.count == 0) {
+        Tree empty; empty.count = 0;
+        void *raw; size_t raw_len;
+        if (tree_serialize(&empty, &raw, &raw_len) != 0) return -1;
+        int ret = object_write(OBJ_TREE, raw, raw_len, id_out);
+        free(raw);
+        return ret;
+    }
+
     // Build tree recursively starting at depth 0 (root)
     return write_tree_level(idx.entries, idx.count, 0, id_out);
 }
