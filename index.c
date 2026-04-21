@@ -176,11 +176,49 @@ int index_load(Index *index) {
 //   - rename                           : atomically moving the temp file over the old index
 //
 // Returns 0 on success, -1 on error.
+
+// Sort helper for index entries by path
+static int cmp_index_path(const void *a, const void *b) {
+    return strcmp(((const IndexEntry *)a)->path,
+                  ((const IndexEntry *)b)->path);
+}
+
 int index_save(const Index *index) {
     // TODO: Implement atomic index saving
     // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+
+    // Step 1: Make a mutable copy so we can sort it
+    Index sorted = *index;
+    qsort(sorted.entries, sorted.count, sizeof(IndexEntry), cmp_index_path);
+
+    // Step 2: Write to a temp file first
+    char tmp_path[256];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_PATH);
+
+    FILE *f = fopen(tmp_path, "w");
+    if (!f) return -1;
+
+    // Step 3: Write each entry in text format
+    for (int i = 0; i < sorted.count; i++) {
+        const IndexEntry *e = &sorted.entries[i];
+        char hex[HASH_HEX_SIZE + 1];
+        hash_to_hex(&e->id, hex);
+        fprintf(f, "%o %s %lu %lu %s\n",
+                e->mode, hex,
+                (unsigned long)e->mtime_sec,
+                (unsigned long)e->size,
+                e->path);
+    }
+
+    // Step 4: Flush userspace buffer, sync to disk, close
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+
+    // Step 5: Atomically replace old index with new one
+    if (rename(tmp_path, INDEX_PATH) != 0) return -1;
+
+    return 0;
 }
 
 // Stage a file for the next commit.
