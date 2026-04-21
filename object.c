@@ -166,7 +166,7 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     size_t total = ftell(f);
     rewind(f);
     uint8_t *buf = malloc(total);
-    fread(buf, 1, total, f);
+    (void)fread(buf, 1, total, f);
     fclose(f);
 
     ObjectID computed;
