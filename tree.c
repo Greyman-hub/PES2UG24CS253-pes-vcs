@@ -109,7 +109,8 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 
 // Recursive helper: builds a tree from a subset of index entries
 // prefix_depth = how many path components deep we are
-static int write_tree_level(IndexEntry *entries, int count, int prefix_depth, ObjectID *id_out) {
+static int write_tree_level(IndexEntry *entries, int count, int prefix_depth, ObjectID *id_out){
+    if (!entries || count <= 0 || !id_out) return -1;
     Tree tree;
     tree.count = 0;
 
