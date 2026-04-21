@@ -213,7 +213,16 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
     commit.timestamp = (uint64_t)time(NULL);
 
-    // Steps 5-8: TODO in next commits
-    (void)message; (void)commit_id_out;
+    // Step 5: Set commit message
+    snprintf(commit.message, sizeof(commit.message), "%s", message);
+
+    // Step 6: Serialize commit struct to text buffer
+    void *data;
+    size_t data_len;
+    if (commit_serialize(&commit, &data, &data_len) != 0) return -1;
+
+    // Steps 7-8: TODO in next commits
+    free(data);
+    (void)commit_id_out;
     return -1;
 }
